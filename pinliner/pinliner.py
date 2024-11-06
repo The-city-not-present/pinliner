@@ -32,8 +32,9 @@ def process_file(cfg, base_dir, package_path):
 
         # Insert escape character before ''' since we'll be using ''' to insert
         # the code as a string
-        output(cfg, code.replace("'''", r"\'''"), newline=cfg.tagging)
-    package_end = cfg.outfile.tell()
+        code = code.replace("'''", r"\'''")
+        output(cfg, code, newline=cfg.tagging)
+    package_end = package_start + len(code)
     is_package = 1 if path.endswith('__init__') else 0
     if is_package:
         path = path[:-9]
@@ -50,8 +51,7 @@ def template(cfg):
     prefix_end = template.index(TEMPLATE_PATTERN)
     prefix_data = template[:prefix_end].replace('%{FORCE_EXC_HOOK}',
                                                 str(cfg.set_hook))
-    prefix_data = prefix_data.replace('%{DEFAULT_PACKAGE}',
-                                      cfg.default_package)
+    prefix_data = prefix_data.replace('%{DEFAULT_PACKAGE}', cfg.default_package).replace('%{CONFIG_VERBOSE}','True' if cfg.verbose else 'False')
     cfg.outfile.write(prefix_data)
     postfix_begin = prefix_end + len(TEMPLATE_PATTERN)
     return template[postfix_begin:]
@@ -117,8 +117,8 @@ a single file and be able to use this single file as if it were a package.
         └── [my_package]
              ├── file_a.py
              ├── [sub_package]
-             │    ├── file_b.py
-             │    └── __init__.py
+             │    ├── file_b.py
+             │    └── __init__.py
              ├── __init__.py
 
     And you execute:
@@ -159,6 +159,9 @@ include a newline and a <tag:file_path> tag before each of the source files.
     parser.add_argument('--tag', default=False, dest='tagging',
                         action='store_true',
                         help="Mark with <tag:file_path> each added file.")
+    parser.add_argument('--verbose', default=False, dest='verbose',
+                        action='store_true',
+                        help="Print messages about modules being loaded and safe module files with code along with .pyc for debugging")
     parser.add_argument('-d', '--default-pkg', default=None,
                         dest='default_package',
                         help='Define the default package when multiple '
@@ -196,8 +199,8 @@ def validate_args(cfg):
 
     if cfg.default_package:
         if cfg.default_package not in cfg.packages:
-            sys.stderr.write('ERROR: %s is not a valid default package' %
-                             cfg.default_pkg)
+            sys.stderr.write('ERROR: %s is not a valid default package, valid are only: [ %s ]' %
+                             ( cfg.default_package, ', '.join(list(cfg.packages)) ))
             sys.exit(2)
         # Convert the default package from path to package
         cfg.default_package = os.path.split(cfg.default_package)[1]

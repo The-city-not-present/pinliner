@@ -4,6 +4,7 @@ import types
 
 PINLINED_DEFAULT_PACKAGE = '%{DEFAULT_PACKAGE}'
 PINLINER_MODULE_NAME = 'pinliner_loader'
+CONFIG_VERBOSE = %{CONFIG_VERBOSE}
 loader_version = '0.2.1'
 
 FORCE_EXC_HOOK = %{FORCE_EXC_HOOK}
@@ -15,15 +16,17 @@ import os
 import struct
 import sys
 import types
+import re
 
 
 class InlinerImporter(object):
     version = '%(loader_version)s'
-    def __init__(self, data, datafile, set_excepthook=True):
+    def __init__(self, data, datafile, set_excepthook=True, verbose=False):
         self.data = data
         self.datafile = datafile
         if set_excepthook:
             sys.excepthook = self.excepthook
+        self.__verbose = verbose
 
     @staticmethod
     def excepthook(type, value, traceback):
@@ -37,10 +40,12 @@ class InlinerImporter(object):
 
     def get_source(self, fullname):
         __, start, end, ts = self.data[fullname]
+        if self.__verbose:
+            print('loading source file contents for file '+str(fullname)+' from position '+str(start)+' to position '+str(end)+'')
         with open(self.datafile) as datafile:
             datafile.seek(start)
             code = datafile.read(end - start)
-        return code
+            return code
 
     def get_code(self, fullname, filename):
         py_ts = self.data[fullname][3]
@@ -52,8 +57,15 @@ class InlinerImporter(object):
                     return marshal.load(pyc)
         except:
             pass
-
+        
         code = self.get_source(fullname)
+
+        if self.__verbose:
+            print('getting compiled code for package: ' + fullname)
+            with open(fullname + '.sample.py', 'w', encoding='utf-8') as f:
+                f.write(code)
+                f.close()
+
         compiled_code = compile(code, filename, 'exec')
 
         try:
@@ -139,7 +151,7 @@ def prepare_package():
             set_excepthook = FORCE_EXC_HOOK
 
         importer = module.InlinerImporter(inliner_packages, filename,
-                                          set_excepthook)
+                                          set_excepthook, verbose=CONFIG_VERBOSE)
         sys.meta_path.append(importer)
 
     # If this is a bundle (multiple packages) without default then don't import
