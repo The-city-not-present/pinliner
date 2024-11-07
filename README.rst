@@ -1,3 +1,15 @@
+
+About this fork:
+
+This is the version that is working for me.
+
+I made these updates:
+
+* [bug] fixed module length issue [https://github.com/Akrog/pinliner/issues/10]
+* [feature] added --verbose flag for debugging
+
+Original description is below:
+
 ===========================
 pinliner - Python Inliner
 ===========================
