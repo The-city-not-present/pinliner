@@ -163,6 +163,14 @@ def prepare_package():
     with open(filename) as datafile:
         datafile.seek(start)
         code = datafile.read(end - start)
+    
+    # delete .pyc files before first loaded package
+    # if we don't do so
+    # we are getting an error "ImportError: invalid flags 1730942170 in 'src'"
+    path = '.'
+    for fname_remove in os.listdir(path):
+        if os.path.isfile(os.path.join(path, fname_remove)) and (os.path.splitext(fname_remove)[-1].lower()=='.pyc'):
+            os.remove(os.path.join(path, fname_remove))
 
     # We need everything to be local variables before we clear the global dict
     def_package = PINLINED_DEFAULT_PACKAGE
