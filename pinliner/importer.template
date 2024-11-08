@@ -166,7 +166,7 @@ def prepare_package():
     
     # delete .pyc files before first loaded package
     # if we don't do so
-    # we are getting an error
+    # we are getting an error "ImportError: invalid flags 1730942170 in 'src'"
     path = '.'
     for fname_remove in os.listdir(path):
         if os.path.isfile(os.path.join(path, fname_remove)) and (os.path.splitext(fname_remove)[-1].lower()=='.pyc'):
