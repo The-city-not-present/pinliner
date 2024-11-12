@@ -10,13 +10,16 @@ loader_version = '0.2.1'
 FORCE_EXC_HOOK = %{FORCE_EXC_HOOK}
 
 inliner_importer_code = '''
-import imp
+import importlib
+import importlib.machinery
+#import pdb
 import marshal
 import os
 import struct
 import sys
 import types
 import re
+
 
 
 class InlinerImporter(object):
@@ -27,13 +30,25 @@ class InlinerImporter(object):
         if set_excepthook:
             sys.excepthook = self.excepthook
         self.__verbose = verbose
+        if self.__verbose:
+            print('InlinerImporter.__init__: InlinerImporter instance is being created')
 
     @staticmethod
     def excepthook(type, value, traceback):
         import traceback as tb
         tb.print_exception(type, value, traceback)
 
+    def find_spec(self,fullname,path,target=None):
+        spec = None
+        if self.__verbose:
+            print('InlinerImporter.find_spec: find_spec called, fullname = '+str(fullname)+', path = "'+str(path)+'", target = "'+str(target)+'", __name__ = "'+str(__name__)+'", found = '+str('True' if fullname in self.data else 'False')+'')
+        if fullname in self.data:
+            spec = importlib.machinery.ModuleSpec(fullname,self)
+        return spec
+
     def find_module(self, fullname, path):
+        if self.__verbose:
+            print('InlinerImporter.find_module: find_module called, fullname = '+str(fullname)+', found = '+str('True' if fullname in self.data else 'False')+'')
         module = fullname in self.data
         if module:
             return self
@@ -41,7 +56,7 @@ class InlinerImporter(object):
     def get_source(self, fullname):
         __, start, end, ts = self.data[fullname]
         if self.__verbose:
-            print('loading source file contents for file '+str(fullname)+' from position '+str(start)+' to position '+str(end)+'')
+            print('InlinerImporter.get_source: loading source file contents for file '+str(fullname)+' from position '+str(start)+' to position '+str(end)+'')
         with open(self.datafile) as datafile:
             datafile.seek(start)
             code = datafile.read(end - start)
@@ -53,7 +68,7 @@ class InlinerImporter(object):
             with open(fullname + '.pyc', 'rb') as pyc:
                 pyc_magic = pyc.read(4)
                 pyc_ts = struct.unpack('<I', pyc.read(4))[0]
-                if pyc_magic == imp.get_magic() and pyc_ts == py_ts:
+                if pyc_magic == importlib.get_magic() and pyc_ts == py_ts:
                     return marshal.load(pyc)
         except:
             pass
@@ -61,7 +76,7 @@ class InlinerImporter(object):
         code = self.get_source(fullname)
 
         if self.__verbose:
-            print('getting compiled code for package: ' + fullname)
+            print('InlinerImporter.get_code: getting compiled code for package: ' + fullname)
             with open(fullname + '.sample.py', 'w', encoding='utf-8') as f:
                 f.write(code)
                 f.close()
@@ -70,7 +85,7 @@ class InlinerImporter(object):
 
         try:
             with open(fullname + '.pyc', 'wb') as pyc:
-                pyc.write(imp.get_magic())
+                pyc.write(importlib.get_magic())
                 pyc.write(struct.pack('<I', py_ts))
                 marshal.dump(compiled_code, pyc)
         except:
@@ -110,9 +125,19 @@ class InlinerImporter(object):
 
 ${CONTENTS}
 
+import importlib
+import importlib.machinery
+#import pdb
+
 def prepare_package():
     # Loader's module name changes with each major version to be able to have
     # different loaders working at the same time.
+    
+    CONFIG_VERBOSE = %{CONFIG_VERBOSE}
+
+    if CONFIG_VERBOSE:
+        print('INLINER IMPORTER TEMPLATE CODE: prepare_package: within prepare_package()')
+
     module_name = PINLINER_MODULE_NAME + '_' + loader_version.split('.')[0]
 
     # If the loader code is not already loaded we create a specific module for
@@ -130,16 +155,26 @@ def prepare_package():
     # We cannot use __file__ directly because on the second run __file__ will
     # be the compiled file (.pyc) and that's not the file we want to read.
     filename = os.path.splitext(__file__)[0] + '.py'
+    if CONFIG_VERBOSE:
+        print('INLINER IMPORTER TEMPLATE CODE: prepare_package: module name is {n}'.format(n=module_name))
+    if CONFIG_VERBOSE:
+        print('INLINER IMPORTER TEMPLATE CODE: prepare_package: file name is {n}'.format(n=filename))
 
     # Add our own finder and loader for this specific package if it's not
     # already there.
     # This must be done before we initialize the package, as it may import
     # packages and modules contained in the package itself.
+    if CONFIG_VERBOSE:
+        print('INLINER IMPORTER TEMPLATE CODE: prepare_package: creating an instance of importer...')
+    importer = None
     for finder in sys.meta_path:
         if (isinstance(finder, module.InlinerImporter) and
                 finder.data == inliner_packages):
+            if CONFIG_VERBOSE:
+                print('INLINER IMPORTER TEMPLATE CODE: prepare_package: it\'s found, setting it to finder')
             importer = finder
-    else:
+    # else: # strange, for some reason "else" is not working as expected - both "importer = finder" and "importer = module.InlinerImporter(...)" are called
+    if not importer:
         # If we haven't forced the setting of the uncaught exception handler
         # we replace it only if it hasn't been replace yet, this is because
         # CPython default handler does not use traceback or even linecache, so
@@ -150,6 +185,8 @@ def prepare_package():
         else:
             set_excepthook = FORCE_EXC_HOOK
 
+        if CONFIG_VERBOSE:
+            print('INLINER IMPORTER TEMPLATE CODE: prepare_package: not found, creating class object...')
         importer = module.InlinerImporter(inliner_packages, filename,
                                           set_excepthook, verbose=CONFIG_VERBOSE)
         sys.meta_path.append(importer)
@@ -159,7 +196,11 @@ def prepare_package():
     if not PINLINED_DEFAULT_PACKAGE:
         return
 
+    if CONFIG_VERBOSE:
+        print('INLINER IMPORTER TEMPLATE CODE: prepare_package: PINLINED_DEFAULT_PACKAGE is "{PINLINED_DEFAULT_PACKAGE}"...'.format(PINLINED_DEFAULT_PACKAGE=PINLINED_DEFAULT_PACKAGE))
     __, start, end, ts = inliner_packages[PINLINED_DEFAULT_PACKAGE]
+    if CONFIG_VERBOSE:
+        print('INLINER IMPORTER TEMPLATE CODE: prepare_package: loading code for "{fname}"...'.format(fname=filename))
     with open(filename) as datafile:
         datafile.seek(start)
         code = datafile.read(end - start)
@@ -168,7 +209,9 @@ def prepare_package():
     # if we don't do so
     # we are getting an error "ImportError: invalid flags 1730942170 in 'src'"
     path = '.'
-    for fname_remove in os.listdir(path):
+    if CONFIG_VERBOSE:
+        print('INLINER IMPORTER TEMPLATE CODE: prepare_package: removing .pyc files in "{path}"...'.format(path=path))
+    for fname_remove in os.listdir(os.path.join(path, '.')):
         if os.path.isfile(os.path.join(path, fname_remove)) and (os.path.splitext(fname_remove)[-1].lower()=='.pyc'):
             os.remove(os.path.join(path, fname_remove))
 
@@ -176,8 +219,16 @@ def prepare_package():
     def_package = PINLINED_DEFAULT_PACKAGE
     name = __name__
     filename = def_package + '/__init__.py'
+    if CONFIG_VERBOSE:
+        print('INLINER IMPORTER TEMPLATE CODE: prepare_package: loading code...')
+    if CONFIG_VERBOSE:
+        print('INLINER IMPORTER TEMPLATE CODE: prepare_package: package name is {p}'.format(p=def_package))
     compiled_code = compile(code, filename, 'exec')
 
+    spec = importlib.machinery.ModuleSpec(def_package,importer)
+
+    if CONFIG_VERBOSE:
+        print('INLINER IMPORTER TEMPLATE CODE: prepare_package: setting globals...')
     # Prepare globals to execute __init__ code
     globals().clear()
     # If we've been called directly we cannot set __path__
@@ -188,9 +239,14 @@ def prepare_package():
     globals().update(__file__=filename,
                      __package__=def_package,
                      __name__=name,
-                     __loader__=importer)
+                     __loader__=importer,
+                     __spec__=spec)
 
+    if CONFIG_VERBOSE:
+        print('INLINER IMPORTER TEMPLATE CODE: prepare_package: executing module code...')
     exec(compiled_code, globals())
+    if CONFIG_VERBOSE:
+        print('INLINER IMPORTER TEMPLATE CODE: prepare_package: end of prepare_package()')
 
 
 # Prepare loader's module and populate this namespace only with package's

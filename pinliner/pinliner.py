@@ -5,8 +5,19 @@ from __future__ import absolute_import
 import argparse
 import json
 import os
-from pinliner import __version__
 import sys
+try:
+    from pinliner import __version__
+except ImportError:
+    # from ..pinliner import __version__
+    # aaah ugly hack sorry
+    # this is called if we don't have pinliner installed as a module - if we simply grab it from gsource codes
+    # so we can still use it
+    # AP 11/12/2024
+    _i = os.path.dirname(os.path.abspath(__file__+'/..'))
+    sys.path.insert(0,_i)
+    from pinliner import __version__
+    #__version__ = '0.2.0'
 
 
 TEMPLATE_FILE = 'importer.template'
@@ -54,7 +65,7 @@ def template(cfg):
     prefix_data = prefix_data.replace('%{DEFAULT_PACKAGE}', cfg.default_package).replace('%{CONFIG_VERBOSE}','True' if cfg.verbose else 'False')
     cfg.outfile.write(prefix_data)
     postfix_begin = prefix_end + len(TEMPLATE_PATTERN)
-    return template[postfix_begin:]
+    return template[postfix_begin:].replace('%{CONFIG_VERBOSE}','True' if cfg.verbose else 'False')
 
 
 def process_directory(cfg, base_dir, package_path):
@@ -74,7 +85,7 @@ def process_files(cfg):
     # template would look better as a context manager
     postfix = template(cfg)
     files = []
-    output(cfg, "'''")
+    output(cfg, "r'''")
     for package_path in cfg.packages:
         base_dir, module_name = os.path.split(package_path)
         files.extend(process_directory(cfg, base_dir, module_name))
