@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import sys
 import types
 
@@ -32,6 +33,13 @@ class InlinerImporter(object):
         self.__verbose = verbose
         if self.__verbose:
             print('InlinerImporter.__init__: InlinerImporter instance is being created')
+        self.temp_files = []
+    
+    def __del__(self):
+        for fname_remove in self.temp_files:
+            if os.path.isfile(fname_remove):
+                os.remove(fname_remove)
+        return super().__del__(self)
 
     @staticmethod
     def excepthook(type, value, traceback):
@@ -65,7 +73,10 @@ class InlinerImporter(object):
     def get_code(self, fullname, filename):
         py_ts = self.data[fullname][3]
         try:
-            with open(fullname + '.pyc', 'rb') as pyc:
+            fname = fullname + '.pyc'
+            fname = Path(fname)
+            fname = '{f}'.format(f=fname.resolve())
+            with open(fname, 'rb') as pyc:
                 pyc_magic = pyc.read(4)
                 pyc_ts = struct.unpack('<I', pyc.read(4))[0]
                 if pyc_magic == importlib.get_magic() and pyc_ts == py_ts:
@@ -84,7 +95,11 @@ class InlinerImporter(object):
         compiled_code = compile(code, filename, 'exec')
 
         try:
-            with open(fullname + '.pyc', 'wb') as pyc:
+            fname = fullname + '.pyc'
+            fname = Path(fname)
+            fname = '{f}'.format(f=fname.resolve())
+            self.temp_files.append(fname)
+            with open(fname, 'wb') as pyc:
                 pyc.write(importlib.get_magic())
                 pyc.write(struct.pack('<I', py_ts))
                 marshal.dump(compiled_code, pyc)
@@ -205,15 +220,16 @@ def prepare_package():
         datafile.seek(start)
         code = datafile.read(end - start)
     
-    # delete .pyc files before first loaded package
-    # if we don't do so
-    # we are getting an error "ImportError: invalid flags 1730942170 in 'src'"
-    path = '.'
-    if CONFIG_VERBOSE:
-        print('INLINER IMPORTER TEMPLATE CODE: prepare_package: removing .pyc files in "{path}"...'.format(path=path))
-    for fname_remove in os.listdir(os.path.join(path, '.')):
-        if os.path.isfile(os.path.join(path, fname_remove)) and (os.path.splitext(fname_remove)[-1].lower()=='.pyc'):
-            os.remove(os.path.join(path, fname_remove))
+    # no longer needed, we delete .pyc files in __del__ method of Importer class
+    ## delete .pyc files before first loaded package
+    ## if we don't do so
+    ## we are getting an error "ImportError: invalid flags 1730942170 in 'src'"
+    #path = '.'
+    #if CONFIG_VERBOSE:
+    #    print('INLINER IMPORTER TEMPLATE CODE: prepare_package: removing .pyc files in "{path}"...'.format(path=path))
+    #for fname_remove in os.listdir(os.path.join(path, '.')):
+    #    if os.path.isfile(os.path.join(path, fname_remove)) and (os.path.splitext(fname_remove)[-1].lower()=='.pyc'):
+    #        os.remove(os.path.join(path, fname_remove))
 
     # We need everything to be local variables before we clear the global dict
     def_package = PINLINED_DEFAULT_PACKAGE
