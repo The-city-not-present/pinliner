@@ -43,7 +43,7 @@ def process_file(cfg, base_dir, package_path):
 
         # Insert escape character before ''' since we'll be using ''' to insert
         # the code as a string
-        code = code.replace("'''", r"\'''")
+        code = code.replace("'''", "\'''")
         output(cfg, code, newline=cfg.tagging)
     package_end = package_start + len(code)
     is_package = 1 if path.endswith('__init__') else 0
