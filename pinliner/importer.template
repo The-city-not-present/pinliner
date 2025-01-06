@@ -65,7 +65,7 @@ class InlinerImporter(object):
         __, start, end, ts = self.data[fullname]
         if self.__verbose:
             print('InlinerImporter.get_source: loading source file contents for file '+str(fullname)+' from position '+str(start)+' to position '+str(end)+'')
-        with open(self.datafile) as datafile:
+        with open(self.datafile, encoding='utf-8') as datafile:
             datafile.seek(start)
             code = datafile.read(end - start)
             return code
@@ -216,7 +216,7 @@ def prepare_package():
     __, start, end, ts = inliner_packages[PINLINED_DEFAULT_PACKAGE]
     if CONFIG_VERBOSE:
         print('INLINER IMPORTER TEMPLATE CODE: prepare_package: loading code for "{fname}"...'.format(fname=filename))
-    with open(filename) as datafile:
+    with open(filename, encoding='utf-8') as datafile:
         datafile.seek(start)
         code = datafile.read(end - start)
     

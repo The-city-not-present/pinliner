@@ -38,7 +38,7 @@ def process_file(cfg, base_dir, package_path):
         path = os.path.splitext(package_path)[0].replace(os.path.sep, '.')
         package_start = cfg.outfile.tell()
         full_path = os.path.join(base_dir, package_path)
-        with open(full_path, 'r') as f:
+        with open(full_path, 'r',encoding='utf-8') as f:
             # Read the whole file
             code = f.read()
 
@@ -167,7 +167,7 @@ include a newline and a <tag:file_path> tag before each of the source files.
     parser.add_argument('packages', nargs='+', help='Packages to inline.')
     parser.add_argument('--version', action='version', version=__version__)
     parser.add_argument('-o', '--outfile', nargs='?',
-                        type=argparse.FileType('w'),
+                        type=argparse.FileType('w',encoding='utf-8'),
                         default=sys.stdout, help='Output file.')
     parser.add_argument('--set-except', default=None, dest='set_hook',
                         action='store_true',
