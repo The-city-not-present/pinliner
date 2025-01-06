@@ -32,27 +32,31 @@ def output(cfg, what, newline=True):
 
 
 def process_file(cfg, base_dir, package_path):
-    if cfg.tagging:
-        output(cfg, '<tag:' + package_path + '>')
-    path = os.path.splitext(package_path)[0].replace(os.path.sep, '.')
-    package_start = cfg.outfile.tell()
-    full_path = os.path.join(base_dir, package_path)
-    with open(full_path, 'r') as f:
-        # Read the whole file
-        code = f.read()
+    try:
+        if cfg.tagging:
+            output(cfg, '<tag:' + package_path + '>')
+        path = os.path.splitext(package_path)[0].replace(os.path.sep, '.')
+        package_start = cfg.outfile.tell()
+        full_path = os.path.join(base_dir, package_path)
+        with open(full_path, 'r') as f:
+            # Read the whole file
+            code = f.read()
 
-        # Insert escape character before ''' since we'll be using ''' to insert
-        # the code as a string
-        code = code.replace("'''", "\'''")
-        output(cfg, code, newline=cfg.tagging)
-    package_end = package_start + len(code)
-    is_package = 1 if path.endswith('__init__') else 0
-    if is_package:
-        path = path[:-9]
+            # Insert escape character before ''' since we'll be using ''' to insert
+            # the code as a string
+            code = code.replace("'''", "\'''")
+            output(cfg, code, newline=cfg.tagging)
+        package_end = package_start + len(code)
+        is_package = 1 if path.endswith('__init__') else 0
+        if is_package:
+            path = path[:-9]
 
-    # Get file timestamp
-    timestamp = int(os.path.getmtime(full_path))
-    return path, is_package, package_start, package_end, timestamp
+        # Get file timestamp
+        timestamp = int(os.path.getmtime(full_path))
+        return path, is_package, package_start, package_end, timestamp
+    except Exception as e:
+        print('pinliner: failed when processing package {f}'.format(f=package_path))
+        raise e
 
 
 def template(cfg):
@@ -69,16 +73,20 @@ def template(cfg):
 
 
 def process_directory(cfg, base_dir, package_path):
-    files = []
-    contents = os.listdir(os.path.join(base_dir, package_path))
-    for content in contents:
-        next_path = os.path.join(package_path, content)
-        path = os.path.join(base_dir, next_path)
-        if is_module(path):
-            files.append(process_file(cfg, base_dir, next_path))
-        elif is_package(path):
-            files.extend(process_directory(cfg, base_dir, next_path))
-    return files
+    try:
+        files = []
+        contents = os.listdir(os.path.join(base_dir, package_path))
+        for content in contents:
+            next_path = os.path.join(package_path, content)
+            path = os.path.join(base_dir, next_path)
+            if is_module(path):
+                files.append(process_file(cfg, base_dir, next_path))
+            elif is_package(path):
+                files.extend(process_directory(cfg, base_dir, next_path))
+        return files
+    except Exception as e:
+        print('pinliner: failed when processing package {f}'.format(f=package_path))
+        raise e
 
 
 def process_files(cfg):
