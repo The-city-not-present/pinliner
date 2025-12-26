@@ -34,7 +34,7 @@ class InlinerImporter(object):
         if self.__verbose:
             print('InlinerImporter.__init__: InlinerImporter instance is being created')
         self.temp_files = []
-    
+
     def __del__(self):
         for fname_remove in self.temp_files:
             if os.path.isfile(fname_remove):
@@ -68,6 +68,20 @@ class InlinerImporter(object):
         with open(self.datafile, encoding='utf-8') as datafile:
             datafile.seek(start)
             code = datafile.read(end - start)
+            if self.__verbose:
+                print('getting code from [{start}] to [{end}]...'.format(start=start,end=end))
+            if self.__verbose:
+                print('unescaping... pattern {f}'.format(f='found' if r"\''"+"'" in code else 'not found'))
+            #if self.__verbose: # TODO: suppress
+            #    print('for debugging: repr(code) (before update) == {f}'.format(f=repr(code)))
+            # unescape quotes back
+            code = code.replace(r"\\''"+"'", "''"+"'")
+            if self.__verbose:
+                print('double checking after replacement... pattern {f}'.format(f='found' if r"\''"+"'" in code else 'not found'))
+            #if self.__verbose: # TODO: suppress
+            #    print('for debugging: repr(code) (after the update) == {f}'.format(f=repr(code)))
+            if self.__verbose:
+                print('returning unescaped...')
             return code
 
     def get_code(self, fullname, filename):
@@ -80,17 +94,23 @@ class InlinerImporter(object):
                 pyc_magic = pyc.read(4)
                 pyc_ts = struct.unpack('<I', pyc.read(4))[0]
                 if pyc_magic == importlib.get_magic() and pyc_ts == py_ts:
+                    if self.__verbose:
+                        print('found .pyc compiled cached code...')
                     return marshal.load(pyc)
         except:
+            if self.__verbose:
+                print('did not find .pyc compiled cached code...')
             pass
-        
+
         code = self.get_source(fullname)
 
         if self.__verbose:
-            print('InlinerImporter.get_code: getting compiled code for package: ' + fullname)
+            print('InlinerImporter.get_code: saving code for testing purposes, as {f}'.format(f=fullname + '.sample.py'))
             with open(fullname + '.sample.py', 'w', encoding='utf-8') as f:
                 f.write(code)
                 f.close()
+        if self.__verbose:
+            print('InlinerImporter.get_code: getting compiled code for package: ' + fullname)
 
         compiled_code = compile(code, filename, 'exec')
 
@@ -147,7 +167,7 @@ import importlib.machinery
 def prepare_package():
     # Loader's module name changes with each major version to be able to have
     # different loaders working at the same time.
-    
+
     CONFIG_VERBOSE = %{CONFIG_VERBOSE}
 
     if CONFIG_VERBOSE:
@@ -219,7 +239,13 @@ def prepare_package():
     with open(filename, encoding='utf-8') as datafile:
         datafile.seek(start)
         code = datafile.read(end - start)
-    
+        if CONFIG_VERBOSE:
+            print('getting code from [{start}] to [{end}]...'.format(start=start,end=end))
+        if CONFIG_VERBOSE:
+            print('unescaping...')
+        # unescape quotes back
+        code = code.replace(r"\''"+"'", "''"+"'")
+
     # no longer needed, we delete .pyc files in __del__ method of Importer class
     ## delete .pyc files before first loaded package
     ## if we don't do so
@@ -240,6 +266,8 @@ def prepare_package():
     if CONFIG_VERBOSE:
         print('INLINER IMPORTER TEMPLATE CODE: prepare_package: package name is {p}'.format(p=def_package))
     compiled_code = compile(code, filename, 'exec')
+    if CONFIG_VERBOSE:
+        print('compiling...')
 
     spec = importlib.machinery.ModuleSpec(def_package,importer)
 
