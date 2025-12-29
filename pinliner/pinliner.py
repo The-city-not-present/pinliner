@@ -6,6 +6,12 @@ import argparse
 import json
 import os
 import sys
+std_import_error = None
+try:
+    import base64
+    import zlib
+except ImportError as e:
+    std_import_error = e # to make it optional
 try:
     from pinliner import __version__
 except ImportError:
@@ -22,6 +28,75 @@ except ImportError:
 
 TEMPLATE_FILE = 'importer.template'
 TEMPLATE_PATTERN = '${CONTENTS}'
+
+
+# class UnsupportedEncodingError(NotImplementedError):
+#     """Requested encoding is not implemented by pinliner."""
+class UnsupportedEncodingError(ValueError): # chatgpt insists it should be derived from Value Error, but I think using NotImplementedError is reasonable... Anyway, I should account for future users and maintainers, and I'll use more conventional, proposed by chatgpt, ValueError
+    """Requested encoding is not implemented by pinliner."""
+
+def encode_payload(code,payload_encoding):
+    if not payload_encoding:
+        payload_encoding = 'default_quotes_escape'
+    # choices = ['default_quotes_escape','skip','base64','base85','zlibbase64','zlibbase85'],
+    if payload_encoding=='skip':
+        return code
+    elif payload_encoding=='default_quotes_escape':
+        return code.replace("'"+"''", r"\'"+"''") # the secuence of triple quotes should not appear in code, or it will be escaped again, so I'll use it constructed of two parts with "+"; and this is not necessary here, in pinliner.py, but anyway I'll arrange it this wat so that it can be copid to the pinliner template file, if needed
+    elif payload_encoding=='base64':
+        if not base64 and std_import_error:
+            raise std_import_error
+        return base64.b64encode(code.encode("utf-8")).decode("ascii")
+    elif payload_encoding=='zlibbase64':
+        if (not base64 or not zlib) and std_import_error:
+            raise std_import_error
+        code_raw = code.encode("utf-8")
+        code_compressed = zlib.compress(code_raw, level=9)
+        return base64.b64encode(code_compressed).decode("ascii")
+    elif payload_encoding=='base85':
+        if not base64 and std_import_error:
+            raise std_import_error
+        return base64.b85encode(code.encode("utf-8")).decode("ascii")
+    elif payload_encoding=='zlibbase85':
+        if (not base64 or not zlib) and std_import_error:
+            raise std_import_error
+        code_raw = code.encode("utf-8")
+        code_compressed = zlib.compress(code_raw, level=9)
+        return base64.b85encode(code_compressed).decode("ascii")
+    else:
+        raise UnsupportedEncodingError('pinliner: encoding payload with method == "{m}": not implemented'.format(m=payload_encoding))
+
+def decode_payload(code,payload_encoding):
+    if not payload_encoding:
+        payload_encoding = 'default_quotes_escape'
+    # choices = ['default_quotes_escape','skip','base64','base85','zlibbase64','zlibbase85'],
+    if payload_encoding=='skip':
+        return code
+    elif payload_encoding=='default_quotes_escape':
+        return code.replace(r"\\''"+"'", "''"+"'") # the secuence of triple quotes should not appear in code, or it will be escaped again, so I'll use it constructed of two parts with "+"
+    elif payload_encoding=='base64':
+        if not base64 and std_import_error:
+            raise std_import_error
+        return base64.b64decode(code.encode("ascii")).decode("utf-8")
+    elif payload_encoding=='zlibbase64':
+        if (not base64 or not zlib) and std_import_error:
+            raise std_import_error
+        code_compressed = base64.b64decode(code.encode("ascii"))
+        code_raw = zlib.decompress(code_compressed)
+        return code_raw.decode("utf-8")
+    elif payload_encoding=='base85':
+        if not base64 and std_import_error:
+            raise std_import_error
+        return base64.b85decode(code.encode("ascii")).decode("utf-8")
+    elif payload_encoding=='zlibbase85':
+        if (not base64 or not zlib) and std_import_error:
+            raise std_import_error
+        code_compressed = base64.b85decode(code.encode("ascii"))
+        code_raw = zlib.decompress(code_compressed)
+        return code_raw.decode("utf-8")
+    else:
+        raise UnsupportedEncodingError('pinliner: encoding payload with method == "{m}": not implemented'.format(m=payload_encoding))
+
 
 
 def output(cfg, what, newline=True):
@@ -44,7 +119,8 @@ def process_file(cfg, base_dir, package_path):
 
             # Insert escape character before ''' since we'll be using ''' to insert
             # the code as a string
-            code = code.replace("'''", r"\'''")
+            # code = code.replace("'''", r"\'''")
+            code = encode_payload(code,cfg.payload_encoding)
             output(cfg, code, newline=cfg.tagging)
         package_end = package_start + len(code)
         is_package = 1 if path.endswith('__init__') else 0
@@ -66,10 +142,10 @@ def template(cfg):
     prefix_end = template.index(TEMPLATE_PATTERN)
     prefix_data = template[:prefix_end].replace('%{FORCE_EXC_HOOK}',
                                                 str(cfg.set_hook))
-    prefix_data = prefix_data.replace('%{DEFAULT_PACKAGE}', cfg.default_package).replace('%{CONFIG_VERBOSE}','True' if cfg.verbose else 'False')
+    prefix_data = prefix_data.replace('%{DEFAULT_PACKAGE}', cfg.default_package).replace('%{CONFIG_VERBOSE}','True' if cfg.verbose else 'False').replace('%{CONFIG_PAYLOAD_ENCODING}','\''+cfg.payload_encoding+'\'')
     cfg.outfile.write(prefix_data)
     postfix_begin = prefix_end + len(TEMPLATE_PATTERN)
-    return template[postfix_begin:].replace('%{CONFIG_VERBOSE}','True' if cfg.verbose else 'False')
+    return template[postfix_begin:].replace('%{CONFIG_VERBOSE}','True' if cfg.verbose else 'False').replace('%{CONFIG_PAYLOAD_ENCODING}','\''+cfg.payload_encoding+'\'')
 
 
 def process_directory(cfg, base_dir, package_path):
@@ -180,7 +256,12 @@ include a newline and a <tag:file_path> tag before each of the source files.
                         help="Mark with <tag:file_path> each added file.")
     parser.add_argument('--verbose', default=False, dest='verbose',
                         action='store_true',
-                        help="Print messages about modules being loaded and safe module files with code along with .pyc for debugging")
+                        help="Print messages about modules being loaded and .py module files with code along with .pyc for debugging (warning: lots of messages, only for debugging)")
+    parser.add_argument('--embed-code-encoding', dest='payload_encoding',
+                        type = str,
+                        choices = ['default_quotes_escape','skip','base64','base85','zlibbase64','zlibbase85'],
+                        default='default_quotes_escape',
+                        help="Control the encoding method for payload (embedded code), possible values are \"default_quotes_escape\" (should be safe escaping but I am not 100% sure), \"skip\" (no transformation, will possibly break if embedded code contains triple quotes), \"base64\" (all encoded with base64, that solves all problems with quotes escaping, the code looks obfuscated but still not a problem for LLMs to analyze, bundle size gets 30% bigger), \"base85\" (same as base64 but with longer dictionary and is more efficient), \"zlibbase64\" (same as base64 but passed through compression to reduce file size), \"zlibbase85\" (same as zlibbase64 but more space-efficient)")
     parser.add_argument('-d', '--default-pkg', default=None,
                         dest='default_package',
                         help='Define the default package when multiple '

@@ -6,6 +6,7 @@ import types
 PINLINED_DEFAULT_PACKAGE = '%{DEFAULT_PACKAGE}'
 PINLINER_MODULE_NAME = 'pinliner_loader'
 CONFIG_VERBOSE = %{CONFIG_VERBOSE}
+CONFIG_PAYLOAD_ENCODING = %{CONFIG_PAYLOAD_ENCODING}
 loader_version = '0.2.1'
 
 FORCE_EXC_HOOK = %{FORCE_EXC_HOOK}
@@ -20,31 +21,131 @@ import struct
 import sys
 import types
 import re
+import atexit  # I don't line unnecessary modules but chatgpt keeps telling me using this is better than __del__()
+
+# for encoding/decoding of payload
+std_import_error = None
+try:
+    import base64
+    import zlib
+except ImportError as e:
+    std_import_error = e # to make it optional
 
 
 
 class InlinerImporter(object):
     version = '%(loader_version)s'
-    def __init__(self, data, datafile, set_excepthook=True, verbose=False):
+    def __init__(self, data, datafile, set_excepthook=True, verbose=False, config_payload_encoding=None):
         self.data = data
         self.datafile = datafile
         if set_excepthook:
             sys.excepthook = self.excepthook
+        self.config_payload_encoding = config_payload_encoding
         self.__verbose = verbose
         if self.__verbose:
             print('InlinerImporter.__init__: InlinerImporter instance is being created')
         self.temp_files = []
+        atexit.register(self.cleanup) # instead of __del__ - this better as of order of when objects are relased (I don't know why, suggested by chatgpt, sorry)
 
-    def __del__(self):
-        for fname_remove in self.temp_files:
-            if os.path.isfile(fname_remove):
-                os.remove(fname_remove)
-        return super().__del__(self)
+    # def __del__(self): # strange, __del__ is not needed, and no need to call it on super class, as it's "object"; but we still need to delete .pyc files, so I'll add a cleanup routine instead
+    #     for fname_remove in self.temp_files:
+    #         if os.path.isfile(fname_remove):
+    #             os.remove(fname_remove)
+    #     return super().__del__(self)
+
+    def cleanup(self):
+        for fname_remove in getattr(self, 'temp_files', []):
+            try:
+                if os.path.isfile(fname_remove):
+                    os.remove(fname_remove)
+            except Exception:
+                pass
 
     @staticmethod
     def excepthook(type, value, traceback):
         import traceback as tb
         tb.print_exception(type, value, traceback)
+
+    # class UnsupportedEncodingError(NotImplementedError):
+    #     """Requested encoding is not implemented by pinliner."""
+    class UnsupportedEncodingError(ValueError): # chatgpt insists it should be derived from Value Error, but I think using NotImplementedError is reasonable... Anyway, I should account for future users and maintainers, and I'll use more conventional, proposed by chatgpt, ValueError
+        """Requested encoding is not implemented by pinliner."""
+    @staticmethod
+    def encode_payload(code,payload_encoding):
+        if not payload_encoding:
+            payload_encoding = 'default_quotes_escape'
+        # choices = ['default_quotes_escape','skip','base64','base85','zlibbase64','zlibbase85'],
+        if payload_encoding=='skip':
+            return code
+        elif payload_encoding=='default_quotes_escape':
+            return code.replace("'"+"''", r"\'"+"''") # the secuence of triple quotes should not appear in code, or it will be escaped again, so I'll use it constructed of two parts with "+"; and this is not necessary here, in pinliner.py, but anyway I'll arrange it this wat so that it can be copid to the pinliner template file, if needed
+        elif payload_encoding=='base64':
+            if not base64 and std_import_error:
+                print(std_import_error,file=sys.stderr)
+                raise std_import_error
+            return base64.b64encode(code.encode("utf-8")).decode("ascii")
+        elif payload_encoding=='zlibbase64':
+            if (not base64 or not zlib) and std_import_error:
+                print(std_import_error,file=sys.stderr)
+                raise std_import_error
+            code_raw = code.encode("utf-8")
+            code_compressed = zlib.compress(code_raw, level=9)
+            return base64.b64encode(code_compressed).decode("ascii")
+        elif payload_encoding=='base85':
+            if not base64 and std_import_error:
+                print(std_import_error,file=sys.stderr)
+                raise std_import_error
+            return base64.b85encode(code.encode("utf-8")).decode("ascii")
+        elif payload_encoding=='zlibbase85':
+            if (not base64 or not zlib) and std_import_error:
+                print(std_import_error,file=sys.stderr)
+                raise std_import_error
+            code_raw = code.encode("utf-8")
+            code_compressed = zlib.compress(code_raw, level=9)
+            return base64.b85encode(code_compressed).decode("ascii")
+        else:
+            err = self.__class__.UnsupportedEncodingError('pinliner: encoding payload with method == "{m}": not implemented'.format(m=payload_encoding))
+            print(err,file=sys.stderr)
+            raise err
+
+    @staticmethod
+    def decode_payload(code,payload_encoding):
+        # raise ValueError('test an error')
+        if not payload_encoding:
+            payload_encoding = 'default_quotes_escape'
+        # choices = ['default_quotes_escape','skip','base64','base85','zlibbase64','zlibbase85'],
+        if payload_encoding=='skip':
+            return code
+        elif payload_encoding=='default_quotes_escape':
+            return code.replace(r"\\''"+"'", "''"+"'") # the secuence of triple quotes should not appear in code, or it will be escaped again, so I'll use it constructed of two parts with "+"
+        elif payload_encoding=='base64':
+            if not base64 and std_import_error:
+                print(std_import_error,file=sys.stderr)
+                raise std_import_error
+            return base64.b64decode(code.encode("ascii")).decode("utf-8")
+        elif payload_encoding=='zlibbase64':
+            if (not base64 or not zlib) and std_import_error:
+                print(std_import_error,file=sys.stderr)
+                raise std_import_error
+            code_compressed = base64.b64decode(code.encode("ascii"))
+            code_raw = zlib.decompress(code_compressed)
+            return code_raw.decode("utf-8")
+        elif payload_encoding=='base85':
+            if not base64 and std_import_error:
+                print(std_import_error,file=sys.stderr)
+                raise std_import_error
+            return base64.b85decode(code.encode("ascii")).decode("utf-8")
+        elif payload_encoding=='zlibbase85':
+            if (not base64 or not zlib) and std_import_error:
+                print(std_import_error,file=sys.stderr)
+                raise std_import_error
+            code_compressed = base64.b85decode(code.encode("ascii"))
+            code_raw = zlib.decompress(code_compressed)
+            return code_raw.decode("utf-8")
+        else:
+            err = self.__class__.UnsupportedEncodingError('pinliner: encoding payload with method == "{m}": not implemented'.format(m=payload_encoding))
+            print(err,file=sys.stderr)
+            raise err
 
     def find_spec(self,fullname,path,target=None):
         spec = None
@@ -75,7 +176,8 @@ class InlinerImporter(object):
             #if self.__verbose: # TODO: suppress
             #    print('for debugging: repr(code) (before update) == {f}'.format(f=repr(code)))
             # unescape quotes back
-            code = code.replace(r"\\''"+"'", "''"+"'")
+            # code = code.replace(r"\\''"+"'", "''"+"'")
+            code = self.decode_payload(code,self.config_payload_encoding)
             if self.__verbose:
                 print('double checking after replacement... pattern {f}'.format(f='found' if r"\''"+"'" in code else 'not found'))
             #if self.__verbose: # TODO: suppress
@@ -163,12 +265,14 @@ ${CONTENTS}
 import importlib
 import importlib.machinery
 #import pdb
+import sys
 
 def prepare_package():
     # Loader's module name changes with each major version to be able to have
     # different loaders working at the same time.
 
     CONFIG_VERBOSE = %{CONFIG_VERBOSE}
+    CONFIG_PAYLOAD_ENCODING = %{CONFIG_PAYLOAD_ENCODING}
 
     if CONFIG_VERBOSE:
         print('INLINER IMPORTER TEMPLATE CODE: prepare_package: within prepare_package()')
@@ -223,7 +327,7 @@ def prepare_package():
         if CONFIG_VERBOSE:
             print('INLINER IMPORTER TEMPLATE CODE: prepare_package: not found, creating class object...')
         importer = module.InlinerImporter(inliner_packages, filename,
-                                          set_excepthook, verbose=CONFIG_VERBOSE)
+                                          set_excepthook, verbose=CONFIG_VERBOSE, config_payload_encoding=CONFIG_PAYLOAD_ENCODING)
         sys.meta_path.append(importer)
 
     # If this is a bundle (multiple packages) without default then don't import
@@ -244,7 +348,8 @@ def prepare_package():
         if CONFIG_VERBOSE:
             print('unescaping...')
         # unescape quotes back
-        code = code.replace(r"\''"+"'", "''"+"'")
+        #code = code.replace(r"\''"+"'", "''"+"'")
+        code = module.InlinerImporter.decode_payload(code,CONFIG_PAYLOAD_ENCODING)
 
     # no longer needed, we delete .pyc files in __del__ method of Importer class
     ## delete .pyc files before first loaded package
