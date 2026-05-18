@@ -24,6 +24,8 @@ except ImportError:
     sys.path.insert(0,_i)
     from pinliner import __version__
     #__version__ = '0.2.0'
+import re
+
 
 
 TEMPLATE_FILE = 'importer.template'
@@ -37,61 +39,77 @@ class UnsupportedEncodingError(ValueError): # chatgpt insists it should be deriv
 
 def encode_payload(code,payload_encoding):
     if not payload_encoding:
-        payload_encoding = 'default_quotes_escape'
-    # choices = ['default_quotes_escape','skip','base64','base85','zlibbase64','zlibbase85'],
+        payload_encoding = 'repr'
+    # choices = ['repr','default_quotes_escape','skip','base64','base85','zlibbase64','zlibbase85'],
     if payload_encoding=='skip':
-        return code
+        triquo_start = "r'''\\n"
+        triquo_end = "\\n'''"
+        return triquo_start + code + triquo_end
+    elif payload_encoding=='repr':
+        return f'{code!r}'
     elif payload_encoding=='default_quotes_escape':
-        return code.replace("'"+"''", r"\'"+"''") # the secuence of triple quotes should not appear in code, or it will be escaped again, so I'll use it constructed of two parts with "+"; and this is not necessary here, in pinliner.py, but anyway I'll arrange it this wat so that it can be copid to the pinliner template file, if needed
+        triquo_start = "'''\\n"
+        triquo_end = "\\n'''"
+        return triquo_start + re.sub(r'(\'{3})',lambda m: f'\\\'\\\'\\\'', code) + triquo_end
     elif payload_encoding=='base64':
         if not base64 and std_import_error:
             raise std_import_error
-        return base64.b64encode(code.encode("utf-8")).decode("ascii")
+        return '"'+base64.b64encode(code.encode("utf-8")).decode("ascii")+'"'
     elif payload_encoding=='zlibbase64':
         if (not base64 or not zlib) and std_import_error:
             raise std_import_error
         code_raw = code.encode("utf-8")
         code_compressed = zlib.compress(code_raw, level=9)
-        return base64.b64encode(code_compressed).decode("ascii")
+        return '"'+base64.b64encode(code_compressed).decode("ascii")+'"'
     elif payload_encoding=='base85':
         if not base64 and std_import_error:
             raise std_import_error
-        return base64.b85encode(code.encode("utf-8")).decode("ascii")
+        return '"'+base64.b85encode(code.encode("utf-8")).decode("ascii")+'"'
     elif payload_encoding=='zlibbase85':
         if (not base64 or not zlib) and std_import_error:
             raise std_import_error
         code_raw = code.encode("utf-8")
         code_compressed = zlib.compress(code_raw, level=9)
-        return base64.b85encode(code_compressed).decode("ascii")
+        return '"'+base64.b85encode(code_compressed).decode("ascii")+'"'
     else:
         raise UnsupportedEncodingError('pinliner: encoding payload with method == "{m}": not implemented'.format(m=payload_encoding))
 
 def decode_payload(code,payload_encoding):
     if not payload_encoding:
-        payload_encoding = 'default_quotes_escape'
-    # choices = ['default_quotes_escape','skip','base64','base85','zlibbase64','zlibbase85'],
+        payload_encoding = 'repr'
+    # choices = ['repr','default_quotes_escape','skip','base64','base85','zlibbase64','zlibbase85'],
     if payload_encoding=='skip':
-        return code
+        triquo_start = "r'''\\n"
+        triquo_end = "\\n'''"
+        assert code.startswith(triquo_start) and code.endswith(triquo_end), 'pinliner: encoding with "skip" - sring must be wrapped with triple quotes'
+        return code[len(triquo_start):-len(triquo_end)]
+    elif payload_encoding=='repr':
+        return eval(code)
     elif payload_encoding=='default_quotes_escape':
-        return code.replace(r"\\''"+"'", "''"+"'") # the secuence of triple quotes should not appear in code, or it will be escaped again, so I'll use it constructed of two parts with "+"
+        triquo_start = "'''\\n"
+        triquo_end = "\\n'''"
+        assert code.startswith(triquo_start) and code.endswith(triquo_end), 'pinliner: encoding with "skip" - sring must be wrapped with triple quotes'
+        code = code[len(triquo_start):-len(triquo_end)]
+        code = re.sub(r'\\\'\\\'\\\'',lambda m: "'''", code)
+        return code
     elif payload_encoding=='base64':
         if not base64 and std_import_error:
             raise std_import_error
-        return base64.b64decode(code.encode("ascii")).decode("utf-8")
+        return base64.b64decode(code[1:-1].encode("ascii")).decode("utf-8")
     elif payload_encoding=='zlibbase64':
         if (not base64 or not zlib) and std_import_error:
             raise std_import_error
-        code_compressed = base64.b64decode(code.encode("ascii"))
+        code_compressed = base64.b64decode(code[1:-1].encode("ascii"))
         code_raw = zlib.decompress(code_compressed)
         return code_raw.decode("utf-8")
     elif payload_encoding=='base85':
         if not base64 and std_import_error:
             raise std_import_error
-        return base64.b85decode(code.encode("ascii")).decode("utf-8")
+        return base64.b85decode(code[1:-1].encode("ascii")).decode("utf-8")
     elif payload_encoding=='zlibbase85':
         if (not base64 or not zlib) and std_import_error:
             raise std_import_error
-        code_compressed = base64.b85decode(code.encode("ascii"))
+        code_compressed = base64.b85decode(code[1:-1].encode("ascii"))
         code_raw = zlib.decompress(code_compressed)
         return code_raw.decode("utf-8")
     else:
@@ -121,7 +139,7 @@ def process_file(cfg, base_dir, package_path):
             # the code as a string
             # code = code.replace("'''", r"\'''")
             code = encode_payload(code,cfg.payload_encoding)
-            output(cfg, code, newline=cfg.tagging)
+            output(cfg, code+"\n", newline=cfg.tagging)
         package_end = package_start + len(code)
         is_package = 1 if path.endswith('__init__') else 0
         if is_package:
@@ -169,11 +187,11 @@ def process_files(cfg):
     # template would look better as a context manager
     postfix = template(cfg)
     files = []
-    output(cfg, "r'''")
+    # output(cfg, "r'''")
     for package_path in cfg.packages:
         base_dir, module_name = os.path.split(package_path)
         files.extend(process_directory(cfg, base_dir, module_name))
-    output(cfg, "'''")
+    # output(cfg, "'''")
 
     # Transform the list into a dictionary
     inliner_packages = {data[0]: data[1:] for data in files}
@@ -259,8 +277,8 @@ include a newline and a <tag:file_path> tag before each of the source files.
                         help="Print messages about modules being loaded and .py module files with code along with .pyc for debugging (warning: lots of messages, only for debugging)")
     parser.add_argument('--embed-code-encoding', dest='payload_encoding',
                         type = str,
-                        choices = ['default_quotes_escape','skip','base64','base85','zlibbase64','zlibbase85'],
-                        default='default_quotes_escape',
+                        choices = ['repr','default_quotes_escape','skip','base64','base85','zlibbase64','zlibbase85'],
+                        default='repr',
                         help="Control the encoding method for payload (embedded code), possible values are \"default_quotes_escape\" (should be safe escaping but I am not 100% sure), \"skip\" (no transformation, will possibly break if embedded code contains triple quotes), \"base64\" (all encoded with base64, that solves all problems with quotes escaping, the code looks obfuscated but still not a problem for LLMs to analyze, bundle size gets 30% bigger), \"base85\" (same as base64 but with longer dictionary and is more efficient), \"zlibbase64\" (same as base64 but passed through compression to reduce file size), \"zlibbase85\" (same as zlibbase64 but more space-efficient)")
     parser.add_argument('-d', '--default-pkg', default=None,
                         dest='default_package',

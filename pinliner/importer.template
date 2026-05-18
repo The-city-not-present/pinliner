@@ -66,80 +66,85 @@ class InlinerImporter(object):
         import traceback as tb
         tb.print_exception(type, value, traceback)
 
-    # class UnsupportedEncodingError(NotImplementedError):
-    #     """Requested encoding is not implemented by pinliner."""
     class UnsupportedEncodingError(ValueError): # chatgpt insists it should be derived from Value Error, but I think using NotImplementedError is reasonable... Anyway, I should account for future users and maintainers, and I'll use more conventional, proposed by chatgpt, ValueError
         """Requested encoding is not implemented by pinliner."""
-    @staticmethod
-    def encode_payload(code,payload_encoding):
-        if not payload_encoding:
-            payload_encoding = 'default_quotes_escape'
-        # choices = ['default_quotes_escape','skip','base64','base85','zlibbase64','zlibbase85'],
-        if payload_encoding=='skip':
-            return code
-        elif payload_encoding=='default_quotes_escape':
-            return code.replace("'"+"''", r"\'"+"''") # the secuence of triple quotes should not appear in code, or it will be escaped again, so I'll use it constructed of two parts with "+"; and this is not necessary here, in pinliner.py, but anyway I'll arrange it this wat so that it can be copid to the pinliner template file, if needed
-        elif payload_encoding=='base64':
-            if not base64 and std_import_error:
-                print(std_import_error,file=sys.stderr)
-                raise std_import_error
-            return base64.b64encode(code.encode("utf-8")).decode("ascii")
-        elif payload_encoding=='zlibbase64':
-            if (not base64 or not zlib) and std_import_error:
-                print(std_import_error,file=sys.stderr)
-                raise std_import_error
-            code_raw = code.encode("utf-8")
-            code_compressed = zlib.compress(code_raw, level=9)
-            return base64.b64encode(code_compressed).decode("ascii")
-        elif payload_encoding=='base85':
-            if not base64 and std_import_error:
-                print(std_import_error,file=sys.stderr)
-                raise std_import_error
-            return base64.b85encode(code.encode("utf-8")).decode("ascii")
-        elif payload_encoding=='zlibbase85':
-            if (not base64 or not zlib) and std_import_error:
-                print(std_import_error,file=sys.stderr)
-                raise std_import_error
-            code_raw = code.encode("utf-8")
-            code_compressed = zlib.compress(code_raw, level=9)
-            return base64.b85encode(code_compressed).decode("ascii")
-        else:
-            err = self.__class__.UnsupportedEncodingError('pinliner: encoding payload with method == "{m}": not implemented'.format(m=payload_encoding))
-            print(err,file=sys.stderr)
-            raise err
+    # @staticmethod
+    # def encode_payload(code,payload_encoding):
+    #   if not payload_encoding:
+    #       payload_encoding = 'repr'
+    #   # choices = ['repr','default_quotes_escape','skip','base64','base85','zlibbase64','zlibbase85'],
+    #   if payload_encoding=='skip':
+    #       triquo_start = "r'"+"''\\n"
+    #       triquo_end = "\\n'"+"''"
+    #       return triquo_start + code + triquo_end
+    #   elif payload_encoding=='repr':
+    #       return f'{code!r}'
+    #   elif payload_encoding=='default_quotes_escape':
+    #       triquo_start = "'"+"''\\n"
+    #       triquo_end = "\\n'"+"''"
+    #       return triquo_start + re.sub(r'(\\'{3})',lambda m: f'\\\\\\'\\\\\\'\\\\\\'', code) + triquo_end
+    #   elif payload_encoding=='base64':
+    #       if not base64 and std_import_error:
+    #           raise std_import_error
+    #       return '"'+base64.b64encode(code.encode("utf-8")).decode("ascii")+'"'
+    #   elif payload_encoding=='zlibbase64':
+    #       if (not base64 or not zlib) and std_import_error:
+    #           raise std_import_error
+    #       code_raw = code.encode("utf-8")
+    #       code_compressed = zlib.compress(code_raw, level=9)
+    #       return '"'+base64.b64encode(code_compressed).decode("ascii")+'"'
+    #   elif payload_encoding=='base85':
+    #       if not base64 and std_import_error:
+    #           raise std_import_error
+    #       return '"'+base64.b85encode(code.encode("utf-8")).decode("ascii")+'"'
+    #   elif payload_encoding=='zlibbase85':
+    #       if (not base64 or not zlib) and std_import_error:
+    #           raise std_import_error
+    #       code_raw = code.encode("utf-8")
+    #       code_compressed = zlib.compress(code_raw, level=9)
+    #       return '"'+base64.b85encode(code_compressed).decode("ascii")+'"'
+    #   else:
+    #       err = self.__class__.UnsupportedEncodingError('pinliner: encoding payload with method == "{m}": not implemented'.format(m=payload_encoding))
+    #       print(err,file=sys.stderr)
+    #       raise err
 
     @staticmethod
     def decode_payload(code,payload_encoding):
-        # raise ValueError('test an error')
         if not payload_encoding:
-            payload_encoding = 'default_quotes_escape'
-        # choices = ['default_quotes_escape','skip','base64','base85','zlibbase64','zlibbase85'],
+            payload_encoding = 'repr'
+        # choices = ['repr','default_quotes_escape','skip','base64','base85','zlibbase64','zlibbase85'],
         if payload_encoding=='skip':
-            return code
+            triquo_start = "r'"+"''\\n"
+            triquo_end = "\\n'"+"''"
+            assert code.startswith(triquo_start) and code.endswith(triquo_end), 'pinliner: encoding with "skip" - sring must be wrapped with triple quotes'
+            return code[len(triquo_start):-len(triquo_end)]
+        elif payload_encoding=='repr':
+            return eval(code)
         elif payload_encoding=='default_quotes_escape':
-            return code.replace(r"\\''"+"'", "''"+"'") # the secuence of triple quotes should not appear in code, or it will be escaped again, so I'll use it constructed of two parts with "+"
+            triquo_start = "'"+"''\\\\n"
+            triquo_end = "\\\\n'"+"''"
+            assert code.startswith(triquo_start) and code.endswith(triquo_end), 'pinliner: encoding with "skip" - sring must be wrapped with triple quotes'
+            code = code[len(triquo_start):-len(triquo_end)]
+            code = re.sub(r'\\\\\\'\\\\\\'\\\\\\'',lambda m: "'"+"''", code)
+            return code
         elif payload_encoding=='base64':
             if not base64 and std_import_error:
-                print(std_import_error,file=sys.stderr)
                 raise std_import_error
-            return base64.b64decode(code.encode("ascii")).decode("utf-8")
+            return base64.b64decode(code[1:-1].encode("ascii")).decode("utf-8")
         elif payload_encoding=='zlibbase64':
             if (not base64 or not zlib) and std_import_error:
-                print(std_import_error,file=sys.stderr)
                 raise std_import_error
-            code_compressed = base64.b64decode(code.encode("ascii"))
+            code_compressed = base64.b64decode(code[1:-1].encode("ascii"))
             code_raw = zlib.decompress(code_compressed)
             return code_raw.decode("utf-8")
         elif payload_encoding=='base85':
             if not base64 and std_import_error:
-                print(std_import_error,file=sys.stderr)
                 raise std_import_error
-            return base64.b85decode(code.encode("ascii")).decode("utf-8")
+            return base64.b85decode(code[1:-1].encode("ascii")).decode("utf-8")
         elif payload_encoding=='zlibbase85':
             if (not base64 or not zlib) and std_import_error:
-                print(std_import_error,file=sys.stderr)
                 raise std_import_error
-            code_compressed = base64.b85decode(code.encode("ascii"))
+            code_compressed = base64.b85decode(code[1:-1].encode("ascii"))
             code_raw = zlib.decompress(code_compressed)
             return code_raw.decode("utf-8")
         else:
@@ -348,7 +353,6 @@ def prepare_package():
         if CONFIG_VERBOSE:
             print('unescaping...')
         # unescape quotes back
-        #code = code.replace(r"\''"+"'", "''"+"'")
         code = module.InlinerImporter.decode_payload(code,CONFIG_PAYLOAD_ENCODING)
 
     # no longer needed, we delete .pyc files in __del__ method of Importer class
