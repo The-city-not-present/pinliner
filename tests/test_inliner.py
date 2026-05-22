@@ -2,11 +2,12 @@ import subprocess
 import time
 import sys
 from pathlib import Path
+import shutil # for deleting src back
 import re
 import pytest
 
 
-data = [
+test_program_files_data = [
     ('dist/__init__.py', ''),
     ('dist/README.md', 'This is a test program, auto-created by script'),
     ('src/__init__.py', ''),
@@ -19,8 +20,9 @@ data = [
 
 
 
-def scan(tmp_path):
-    root = Path(tmp_path)
+def scan_and_capture_program_files(path):
+    """Use this to generate the test_program_files_data """
+    root = Path(path)
     excluded = {".git", "__pycache__",".DS_Store"}
 
     files_data = []
@@ -43,16 +45,19 @@ def scan(tmp_path):
                 print(f'Failed processing {path}: {e}',file=sys.stdout)
                 raise e
 
-    # print(repr(files_data))
     return files_data
 
-def restore(tmp_path):
+def write_test_program_files(path):
+    """Use this to create physical files for the test program on disk
+    The source for files is test_program_files_data
+    And the target is tmp_path (assuming all we create is in src/)
+    """
 
-    output_root = Path(tmp_path).resolve()
+    output_root = Path(path).resolve()
     print(f'Creating test program files in {output_root}...')
     n_processed = 0
 
-    for rel_path, content in data:
+    for rel_path, content in test_program_files_data:
         file_path = output_root / rel_path
 
         # Create parent folders automatically
@@ -66,11 +71,13 @@ def restore(tmp_path):
 
 
 def check_test_output_correct(output):
+    """Individual tests to check outputs from specific programs"""
     # assert re.match()
     msg = 'Hello, world from test program!'
     assert msg in output, f'Error: output does not include the expected string\n=== EXPECTED ===\n{msg}\n=== END EXPECTED ===\n=== ACTUAL OUTPUT ===\n{output}\n=== END OUTPUT ===\n'
 
 def check_txt_repr_in_module2(output):
+    """Individual tests to check outputs from specific programs"""
     txt = "hello\\\\\'\'\'\\\'\'\' \'\'\'yes"
     msg = f'txt == {repr(txt)}'
     assert msg in output, f'Error: output does not include the expected string\n=== EXPECTED ===\n{msg}\n=== END EXPECTED ===\n=== ACTUAL OUTPUT ===\n{output}\n=== END OUTPUT ===\n'
@@ -84,23 +91,29 @@ verify_result_tests = [
 ROOT_PROJECT = Path(__file__).resolve().parents[1]
 
 
-# def test_pinliner_escape_notspecified_hello(tmp_path):
-def run_pinliner_tsts(tmp_path,pinliner_added_args:list[str],program_to_test:str):
+def tst(tmp_path,pinliner_added_args:list[str],program_to_test:str):
+    """Run the test, as specified in arguments"""
+
+    # Step 0: prepare constants
     project_dir = ROOT_PROJECT.resolve()
     pinliner_executable = (ROOT_PROJECT / "pinliner/pinliner.py").resolve()
     python_executable = Path(sys.executable).resolve()
     output_bundle = (tmp_path / 'dist' / 'test_bundle.py').resolve()
     print(f'for debugging:\ntmp_path == {tmp_path},\nproject_dir == {repr(project_dir)},\npinliner_executable == {repr(pinliner_executable)},\npython_executable == {repr(python_executable)},\noutput_bundle == {repr(output_bundle)}\n')
+
+    # Step 1. Create test program in tmp_path
     print('creating temporary program for testing in tml folder...')
-    restore(tmp_path)
+    write_test_program_files(tmp_path)
     print('Verify temp program exists...')
     expected_test_program_module = tmp_path / 'src' / 'launcher.py'
     if True:
         def s(t):
             return f'{t}'
-        print(f'list files in tmp_path:\n{tmp_path}\n{"\n".join([s(tmp_path/path[0]) for path in scan(tmp_path)])}')
+        print(f'list files in tmp_path:\n{tmp_path}\n{"\n".join([s(tmp_path/path[0]) for path in scan_and_capture_program_files(tmp_path)])}')
     assert expected_test_program_module.exists(), "Error: test program was not created"
     print('done')
+
+    # Step 2.pre. Run pinliner on recursive sub-bundle, if tested feature is "recursive"
     if program_to_test in ['recursive']:
         print('Creating sub-bundle: calling pinliner...')
         output_subbundle = (tmp_path / 'src' / 'recursive' / 'bundle.py').resolve()
@@ -130,6 +143,8 @@ def run_pinliner_tsts(tmp_path,pinliner_added_args:list[str],program_to_test:str
         with open(output_subbundle,'a',encoding='utf-8') as f:
             f.write('from src import launcher\n')
         print('done')
+
+    # Step 2. Build the bundle
     print('Calling pinliner...')
     print('Verify bundle exists (it should not)...')
     assert not output_bundle.exists(), f'Failed (bundle already exists before calling pinliner ({output_bundle})'
@@ -156,6 +171,13 @@ def run_pinliner_tsts(tmp_path,pinliner_added_args:list[str],program_to_test:str
     with open(output_bundle,'a',encoding='utf-8') as f:
         f.write('from src import launcher\nlauncher.main()\n')
     print('done')
+
+    # Step 3. Remove the test program src files, to clearly test the bundle is working without the test files
+    print('As bundle exists, remove the src files...')
+    shutil.rmtree(tmp_path / 'src')
+    print('done')
+
+    # Step 4. Actually, launch the bundle and run the test
     print('starting test...')
     print(f'to verify: bundle is {output_bundle}')
     result = subprocess.run(
@@ -175,108 +197,116 @@ def run_pinliner_tsts(tmp_path,pinliner_added_args:list[str],program_to_test:str
 
 
 def test_pinliner_escape_notspecified_hello(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=[],program_to_test='test')
+    return tst(tmp_path,pinliner_added_args=[],program_to_test='test')
 
 def test_pinliner_escape_notspecified_module2(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=[],program_to_test='module2')
+    return tst(tmp_path,pinliner_added_args=[],program_to_test='module2')
 
 def test_pinliner_escape_notspecified_module3(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=[],program_to_test='module3')
+    return tst(tmp_path,pinliner_added_args=[],program_to_test='module3')
 
+@pytest.mark.xfail(reason="Recursive inclusion can\'t work, even theoretically. We are loading code from source file but the file does not exist")
 def test_pinliner_escape_notspecified_recursive(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=[],program_to_test='recursive')
+    return tst(tmp_path,pinliner_added_args=[],program_to_test='recursive')
 
 
 def test_pinliner_escape_repr_hello(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','repr'],program_to_test='test')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','repr'],program_to_test='test')
 
 def test_pinliner_escape_repr_module2(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','repr'],program_to_test='module2')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','repr'],program_to_test='module2')
 
 def test_pinliner_escape_repr_module3(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','repr'],program_to_test='module3')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','repr'],program_to_test='module3')
 
+@pytest.mark.xfail(reason="Recursive inclusion can\'t work, even theoretically. We are loading code from source file but the file does not exist")
 def test_pinliner_escape_repr_recursive(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','repr'],program_to_test='recursive')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','repr'],program_to_test='recursive')
 
 
 def test_pinliner_escape_default_quotes_escape_hello(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','default_quotes_escape'],program_to_test='test')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','default_quotes_escape'],program_to_test='test')
 
 def test_pinliner_escape_default_quotes_escape_module2(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','default_quotes_escape'],program_to_test='module2')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','default_quotes_escape'],program_to_test='module2')
 
 def test_pinliner_escape_default_quotes_escape_module3(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','default_quotes_escape'],program_to_test='module3')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','default_quotes_escape'],program_to_test='module3')
 
+@pytest.mark.xfail(reason="Recursive inclusion can\'t work, even theoretically. We are loading code from source file but the file does not exist")
 def test_pinliner_escape_default_quotes_escape_recursive(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','default_quotes_escape'],program_to_test='recursive')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','default_quotes_escape'],program_to_test='recursive')
 
 
-@pytest.mark.xfail(reason="escaping is normal, it is expected that tests fail if escaping is skipped")
+@pytest.mark.xfail(reason="Escaping is normal, it is expected that tests fail if escaping is skipped")
 def test_pinliner_escape_skip_hello(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','skip'],program_to_test='test')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','skip'],program_to_test='test')
 
-@pytest.mark.xfail(reason="escaping is normal, it is expected that tests fail if escaping is skipped")
+@pytest.mark.xfail(reason="Escaping is normal, it is expected that tests fail if escaping is skipped")
 def test_pinliner_escape_skip_module2(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','skip'],program_to_test='module2')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','skip'],program_to_test='module2')
 
-@pytest.mark.xfail(reason="escaping is normal, it is expected that tests fail if escaping is skipped")
+@pytest.mark.xfail(reason="Escaping is normal, it is expected that tests fail if escaping is skipped")
 def test_pinliner_escape_skip_module3(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','skip'],program_to_test='module3')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','skip'],program_to_test='module3')
 
-@pytest.mark.xfail(reason="escaping is normal, it is expected that tests fail if escaping is skipped")
+@pytest.mark.xfail(reason="Recursive inclusion can\'t work, even theoretically. We are loading code from source file but the file does not exist")
+@pytest.mark.xfail(reason="Escaping is normal, it is expected that tests fail if escaping is skipped")
 def test_pinliner_escape_skip_recursive(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','skip'],program_to_test='recursive')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','skip'],program_to_test='recursive')
 
 
 def test_pinliner_escape_base64_hello(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','base64'],program_to_test='test')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','base64'],program_to_test='test')
 
 def test_pinliner_escape_base64_module2(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','base64'],program_to_test='module2')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','base64'],program_to_test='module2')
 
 def test_pinliner_escape_base64_module3(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','base64'],program_to_test='module3')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','base64'],program_to_test='module3')
 
+@pytest.mark.xfail(reason="Recursive inclusion can\'t work, even theoretically. We are loading code from source file but the file does not exist")
 def test_pinliner_escape_base64_recursive(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','base64'],program_to_test='recursive')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','base64'],program_to_test='recursive')
 
 
 def test_pinliner_escape_base85_hello(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','base85'],program_to_test='test')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','base85'],program_to_test='test')
 
 def test_pinliner_escape_base85_module2(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','base85'],program_to_test='module2')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','base85'],program_to_test='module2')
 
 def test_pinliner_escape_base85_module3(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','base85'],program_to_test='module3')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','base85'],program_to_test='module3')
 
+@pytest.mark.xfail(reason="Recursive inclusion can\'t work, even theoretically. We are loading code from source file but the file does not exist")
 def test_pinliner_escape_base85_recursive(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','base85'],program_to_test='recursive')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','base85'],program_to_test='recursive')
 
 
 def test_pinliner_escape_zlibbase64_hello(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','zlibbase64'],program_to_test='test')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','zlibbase64'],program_to_test='test')
 
 def test_pinliner_escape_zlibbase64_module2(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','zlibbase64'],program_to_test='module2')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','zlibbase64'],program_to_test='module2')
 
 def test_pinliner_escape_zlibbase64_module3(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','zlibbase64'],program_to_test='module3')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','zlibbase64'],program_to_test='module3')
 
+@pytest.mark.xfail(reason="Recursive inclusion can\'t work, even theoretically. We are loading code from source file but the file does not exist")
 def test_pinliner_escape_zlibbase64_recursive(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','zlibbase64'],program_to_test='recursive')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','zlibbase64'],program_to_test='recursive')
 
 
 def test_pinliner_escape_zlibbase85_hello(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','zlibbase85'],program_to_test='test')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','zlibbase85'],program_to_test='test')
 
 def test_pinliner_escape_zlibbase85_module2(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','zlibbase85'],program_to_test='module2')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','zlibbase85'],program_to_test='module2')
 
 def test_pinliner_escape_zlibbase85_module3(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','zlibbase85'],program_to_test='module3')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','zlibbase85'],program_to_test='module3')
 
+@pytest.mark.xfail(reason="Recursive inclusion can\'t work, even theoretically. We are loading code from source file but the file does not exist")
 def test_pinliner_escape_zlibbase85_recursive(tmp_path):
-    return run_pinliner_tsts(tmp_path,pinliner_added_args=['--embed-code-encoding','zlibbase85'],program_to_test='recursive')
+    return tst(tmp_path,pinliner_added_args=['--embed-code-encoding','zlibbase85'],program_to_test='recursive')

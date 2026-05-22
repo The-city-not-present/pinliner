@@ -50,7 +50,9 @@ def encode_payload(code,payload_encoding):
     elif payload_encoding=='default_quotes_escape':
         triquo_start = "'''\\n"
         triquo_end = "\\n'''"
-        return triquo_start + re.sub(r'(\'{3})',lambda m: f'\\\'\\\'\\\'', code) + triquo_end
+        code = re.sub(r'\\\'','\\\\\\\'',code)
+        code = re.sub(r'(\'{3})',lambda m: f'\\\'\\\'\\\'', code)
+        return triquo_start + code + triquo_end
     elif payload_encoding=='base64':
         if not base64 and std_import_error:
             raise std_import_error
@@ -91,6 +93,7 @@ def decode_payload(code,payload_encoding):
         assert code.startswith(triquo_start) and code.endswith(triquo_end), 'pinliner: encoding with "skip" - sring must be wrapped with triple quotes'
         code = code[len(triquo_start):-len(triquo_end)]
         code = re.sub(r'\\\'\\\'\\\'',lambda m: "'''", code)
+        code = re.sub(r'\\\\\'','\\\'',code)
         return code
     elif payload_encoding=='base64':
         if not base64 and std_import_error:
